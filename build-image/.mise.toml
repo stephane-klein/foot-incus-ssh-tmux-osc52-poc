@@ -15,7 +15,7 @@ sudo systemd-run --scope --quiet \
   --sources-dir .distrobuilder-sources
 sudo chown -R $USER:$USER dist-fedora-lxc
 ls -lha dist-fedora-lxc/
-echo "Image built in dist-fedora-lxc/. Run 'mise run import-lxc' to import it into incus1:"
+echo "Image built in dist-fedora-lxc/. Run 'mise run import-lxc-image-to-incus1-registry' to import it into incus1:"
 """
 
 [tasks.import-lxc-image-to-incus1-registry]

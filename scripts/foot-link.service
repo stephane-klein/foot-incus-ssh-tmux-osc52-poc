@@ -1,0 +1,12 @@
+[Unit]
+Description=foot host -> Incus reverse link (session dbus + audio sockets)
+Documentation=docs/remote-desktop-link.md
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/ssh -N -T -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -R /tmp/foot-host-bus:%t/bus -R /tmp/foot-host-pulse:%t/pulse/native fedora@foot-incus-ssh-tmux-osc52-poc.homelab.stephane-klein.info
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

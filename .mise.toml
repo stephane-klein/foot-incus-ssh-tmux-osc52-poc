@@ -31,12 +31,48 @@ ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERRO
 
 [tasks.console]
 run = """
+set -euo pipefail
+
+# Remote-desktop link (see docs/remote-desktop-link.md): make sure the
+# foot host -> instance reverse link (session dbus + audio sockets) is running
+# so the console can reach the local desktop (xdg-open, notify-send, paplay).
+# A console is still opened if the link cannot be started.
+systemd_user_dir="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+mkdir -p "${systemd_user_dir}"
+install -m 0644 scripts/foot-link.service "${systemd_user_dir}/foot-link.service"
+if systemctl --user daemon-reload 2>/dev/null; then
+  systemctl --user start foot-link.service 2>/dev/null || \
+    echo "foot-link: unable to start the dbus/audio reverse link" >&2
+else
+  echo "foot-link: no systemd user manager, reverse link not started" >&2
+fi
+
 foot \
   --config assets/foot.ini \
+  --maximized \
   -e \
   ssh -t \
     -o StrictHostKeyChecking=accept-new \
     -o UserKnownHostsFile=/dev/null \
     -o LogLevel=ERROR \
     fedora@foot-incus-ssh-tmux-osc52-poc.homelab.stephane-klein.info
+"""
+
+[tasks.remove-foot-link]
+description = "Stop and remove the foot-link.service systemd user unit"
+run = """
+set -euo pipefail
+
+systemd_user_dir="${XDG_CONFIG_HOME:-$HOME}/.config/systemd/user"
+unit="${systemd_user_dir}/foot-link.service"
+
+if systemctl --user daemon-reload 2>/dev/null; then
+  systemctl --user stop foot-link.service 2>/dev/null || true
+  systemctl --user disable foot-link.service 2>/dev/null || true
+  rm -f "${unit}"
+  systemctl --user daemon-reload
+  echo "foot-link.service removed"
+else
+  echo "foot-link: no systemd user manager, nothing to remove" >&2
+fi
 """

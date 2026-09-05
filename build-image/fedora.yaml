@@ -225,6 +225,13 @@ files:
     # not launched for such sessions.
     set -eu
 
+    # Remote-desktop link: the foot host forwards its session bus and audio
+    # server into the instance over two reverse-unix-socket ssh forwards (see
+    # docs/remote-desktop-link.md). Export the sockets so tmux (exec'd below) and
+    # the panes it spawns reach the foot host (notify-send, xdg-open, paplay...).
+    export DBUS_SESSION_BUS_ADDRESS=unix:path=/tmp/foot-host-bus
+    export PULSE_SERVER=unix:/tmp/foot-host-pulse
+
     login_shell=$(getent passwd "$(id -un)" | cut -d: -f7)
     login_shell=${login_shell:-/bin/sh}
 
@@ -277,6 +284,14 @@ files:
     #   ssh host (no tty)  -> login shell, no tmux
     Match User fedora
         ForceCommand /usr/local/bin/ssh-tmux-login
+
+- path: /etc/ssh/sshd_config.d/foot-link.conf
+  generator: dump
+  content: |-
+    # Remove stale unix-socket reverse-forward listeners (see the foot-link
+    # systemd unit on the foot host, docs/remote-desktop-link.md) left behind by
+    # a crashed ssh session, so a restart can bind them again.
+    StreamLocalBindUnlink yes
 
 - name: meta-data
   generator: cloud-init
@@ -357,6 +372,8 @@ packages:
     - chafa
     - ImageMagick
     - libsixel-utils
+    - libnotify
+    - pulseaudio-utils
     action: install
 
   - packages:
@@ -479,7 +496,13 @@ actions:
   - ppc64le
   - s390x
 
-- trigger: post-packages
+# The build-time /etc/resolv.conf is a bind-mount from the host that
+# distrobuilder keeps alive for the network needs of dnf and the post-packages
+# hooks. This hook replaces it with the systemd-resolved stub (final runtime
+# state). It deliberately runs at the post-files stage, NOT post-packages:
+# post-packages hooks that need the network (e.g. the image.nvim download
+# below) must still resolve DNS. Keep this hook after the post-packages phase.
+- trigger: post-files
   action: |-
     #!/bin/sh
     set -eux
@@ -607,6 +630,40 @@ actions:
     mv /tmp/image.nvim-extract/image.nvim-* /home/fedora/.local/share/nvim/site/pack/vendor/start/image.nvim
     rm -rf /tmp/image.nvim.tgz /tmp/image.nvim-extract
     chown -R fedora:fedora /home/fedora/.local/share/nvim
+
+# Remote-desktop link: the foot host forwards its session bus and audio server
+# into the instance over two reverse-unix-socket ssh forwards (see
+# docs/remote-desktop-link.md).
+# - /usr/local/bin/xdg-open forwards to the foot host's desktop portal
+#   (org.freedesktop.portal.OpenURI) so remote `xdg-open` opens the local
+#   browser, instead of failing on the headless instance.
+# - /etc/profile.d exports the forwarded sockets so login shells reach the foot
+#   host (non-tmux `ssh host`); /usr/local/bin/ssh-tmux-login exports them again
+#   before exec tmux so grouped-console panes inherit them.
+- trigger: post-packages
+  action: |-
+    #!/bin/sh
+    set -eux
+
+    cat > /usr/local/bin/xdg-open <<'EOF'
+    #!/bin/bash
+    DBUS_SESSION_BUS_ADDRESS="unix:path=/tmp/foot-host-bus"
+    export DBUS_SESSION_BUS_ADDRESS
+    for url in "$@"; do
+      gdbus call --session \
+        --dest org.freedesktop.portal.Desktop \
+        --object-path /org/freedesktop/portal/desktop \
+        --method org.freedesktop.portal.OpenURI.OpenURI \
+        '' "$url" '{}' >/dev/null 2>&1
+    done
+    EOF
+    chmod 0755 /usr/local/bin/xdg-open
+
+    cat > /etc/profile.d/foot-host-link.sh <<'EOF'
+    export DBUS_SESSION_BUS_ADDRESS=unix:path=/tmp/foot-host-bus
+    export PULSE_SERVER=unix:/tmp/foot-host-pulse
+    EOF
+    chmod 0644 /etc/profile.d/foot-host-link.sh
 
 - trigger: post-packages
   action: |-
