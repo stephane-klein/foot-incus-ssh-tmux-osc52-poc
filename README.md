@@ -6,7 +6,7 @@ I created this POC to set up a terminal emulator based on the following stack: [
 
 This environment must support the following features:
 
-- [ ] Multiple foot instances connect to a single shared tmux session but can display different windows (tmux session groups, see [tmux FAQ](https://github.com/tmux/tmux/wiki/FAQ#how-do-i-attach-the-same-session-to-multiple-clients-but-with-a-different-current-window-like-screen--x))
+- [x] Multiple foot instances connect to a single shared tmux session but can display different windows (tmux session groups, see [tmux FAQ](https://github.com/tmux/tmux/wiki/FAQ#how-do-i-attach-the-same-session-to-multiple-clients-but-with-a-different-current-window-like-screen--x))
 - [ ] Implement bidirectional copy-paste via OSC52 across the whole foot → ssh → tmux chain
 - [ ] Implement image display in the terminal
 - [ ] Implement opening remote URLs in the local host's browser

@@ -28,3 +28,15 @@ incus-apply incus-poc-lxc.yaml
 run = """
 ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR fedora@foot-incus-ssh-tmux-osc52-poc.homelab.stephane-klein.info
 """
+
+[tasks.console]
+run = """
+foot \
+  --config assets/foot.ini \
+  -e \
+  ssh -t \
+    -o StrictHostKeyChecking=accept-new \
+    -o UserKnownHostsFile=/dev/null \
+    -o LogLevel=ERROR \
+    fedora@foot-incus-ssh-tmux-osc52-poc.homelab.stephane-klein.info
+"""

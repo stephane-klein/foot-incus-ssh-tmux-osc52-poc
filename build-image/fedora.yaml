@@ -204,6 +204,80 @@ files:
 
     exit 0
 
+- path: /usr/local/bin/ssh-tmux-login
+  generator: dump
+  content: |-
+    #!/bin/sh
+    # Launch wrapper forced by sshd (Match User fedora / ForceCommand) so tmux
+    # starts by default on interactive login, whatever the user's shell is.
+    #
+    # Behaviour:
+    #   - a command was requested by the client (ssh host <cmd>, rsync, sftp)
+    #     -> run it unchanged
+    #   - no tty allocated (e.g. plain `ssh host` without -t)
+    #     -> plain login shell, no tmux
+    #   - otherwise -> tmux session grouped with the shared "main" workspace
+    #     (tmux session groups / screen -x model): every console shares the
+    #     same windows and panes but keeps its own current window
+    #
+    # Opt-out without tmux: `ssh -t host bash` (or zsh/fish, `bash -l` for a
+    # login shell). The requested command is routed below, so tmux is simply
+    # not launched for such sessions.
+    set -eu
+
+    login_shell=$(getent passwd "$(id -un)" | cut -d: -f7)
+    login_shell=${login_shell:-/bin/sh}
+
+    if [ -n "${SSH_ORIGINAL_COMMAND:-}" ]; then
+      case "$SSH_ORIGINAL_COMMAND" in
+        *sftp-server*) exec /usr/libexec/openssh/sftp-server ;;
+        *)             exec "$login_shell" -c "$SSH_ORIGINAL_COMMAND" ;;
+      esac
+    fi
+
+    # No pseudo-terminal: not an interactive console session, do not start tmux.
+    [ -t 0 ] || exec "$login_shell"
+
+    # --- Shared workspace in grouped sessions (screen -x model) ---
+    # "main" is the anchor session hosting the shared windows/panes. Each ssh
+    # console attaches its own session grouped with main: same windows, but an
+    # independent current window per console.
+    #
+    # Console sessions are kept after a client detaches; unattached ones are
+    # reaped on the next login. Full manual cleanup:
+    #   tmux kill-session -a -t main   (kills every session except main)
+    if ! tmux has-session -t main 2>/dev/null; then
+      tmux new-session -d -s main 2>/dev/null || true
+    fi
+
+    tmux list-sessions -F '#{session_attached}:#{session_name}' 2>/dev/null |
+    while IFS=: read -r attached name; do
+      case "$name" in
+        console-*) ;;
+        *) continue ;;
+      esac
+      [ "$attached" = 0 ] || continue
+      tmux kill-session -t "$name" 2>/dev/null || true
+    done
+
+    console_session="console-$(date +%s)-$$"
+    tmux new-session -d -t main -s "$console_session" 2>/dev/null || true
+    exec tmux attach-session -t "$console_session"
+
+- path: /etc/ssh/sshd_config.d/tmux-force.conf
+  generator: dump
+  content: |-
+    # Force every session of the "fedora" user through the shared launcher
+    # (/usr/local/bin/ssh-tmux-login) so tmux starts by default on interactive
+    # ssh login, whatever the user's shell is.
+    #
+    #   ssh -t host        -> tmux (default)
+    #   ssh -t host bash   -> plain interactive shell, no tmux (opt-out)
+    #   ssh host '<cmd>'   -> command/subsystem preserved (scp, rsync...)
+    #   ssh host (no tty)  -> login shell, no tmux
+    Match User fedora
+        ForceCommand /usr/local/bin/ssh-tmux-login
+
 - name: meta-data
   generator: cloud-init
   variants:
@@ -519,3 +593,11 @@ actions:
 
     # Disable xfs_healer
     systemctl mask xfs_healer@-.service
+
+- trigger: post-files
+  action: |-
+    #!/bin/sh
+    set -eux
+
+    # distrobuilder writes dumped files without the executable bit.
+    chmod 0755 /usr/local/bin/ssh-tmux-login
