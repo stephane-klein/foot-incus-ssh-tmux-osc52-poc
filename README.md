@@ -17,6 +17,17 @@ If this POC is successful, I want to reuse this implementation to migrate the [`
 
 Related resource: [`incus-poc`](https://github.com/stephane-klein/incus-poc).
 
-## Current status
+## Getting started
 
-For now, I have only defined the objectives of this POC (see the todo list above): nothing has been implemented yet.
+### Build Incus LXC Fedora image
+
+See [`./build-image/`](./build-image/).
+
+### Deploy Incus LXC Fedora instance
+
+```sh
+$ mise install
+$ mise run deploy-lxc
+$ mise run enter-in-lxc
+[fedora@foot-incus-ssh-tmux-osc52-poc ~]$
+```

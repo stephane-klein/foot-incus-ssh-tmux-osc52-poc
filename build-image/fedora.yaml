@@ -1,0 +1,521 @@
+# This file is based on https://github.com/lxc/lxc-ci/blob/main/images/fedora.yaml
+image:
+  distribution: fedora
+  release: "44"
+  name: fedora-44-sklein
+  variant: cloud
+
+source:
+  downloader: fedora-http
+  url: https://kojipkgs.fedoraproject.org
+
+targets:
+  lxc:
+    create_message: |
+      You just created a {{ image.description }} container.
+    config:
+    - type: all
+      before: 5
+      content: |-
+        lxc.include = LXC_TEMPLATE_CONFIG/fedora.common.conf
+
+    - type: user
+      before: 5
+      content: |-
+        lxc.include = LXC_TEMPLATE_CONFIG/fedora.userns.conf
+
+    - type: all
+      after: 4
+      content: |-
+        lxc.include = LXC_TEMPLATE_CONFIG/common.conf
+
+    - type: user
+      after: 4
+      content: |-
+        lxc.include = LXC_TEMPLATE_CONFIG/userns.conf
+
+    - type: all
+      content: |-
+        lxc.arch = {{ image.architecture_kernel }}
+
+files:
+- path: /etc/systemd/system-preset/00-lxc-fedora.preset
+  generator: dump
+  content: |-
+    # Preserve image-selected network services across systemd first boot.
+    ignore systemd-resolved.service
+    ignore systemd-networkd.service
+
+- path: /etc/default/grub
+  generator: dump
+  content: |-
+    # Set the recordfail timeout
+    GRUB_RECORDFAIL_TIMEOUT=0
+
+    # Do not wait on grub prompt
+    GRUB_TIMEOUT=0
+
+    # Set the default commandline
+    GRUB_CMDLINE_LINUX_DEFAULT="${GRUB_CMDLINE_LINUX_DEFAULT} console=tty1 console=ttyS0"
+
+    # Set the grub console type
+    GRUB_TERMINAL=console
+
+    # Disable os-prober
+    GRUB_DISABLE_OS_PROBER=true
+  types:
+  - vm
+
+- path: /etc/dracut.conf.d/incus.conf
+  generator: dump
+  content: |-
+    add_drivers+=" virtio_scsi "
+  types:
+  - vm
+
+- generator: fstab
+  types:
+  - vm
+
+- path: /etc/machine-id
+  generator: dump
+  content: uninitialized
+
+- path: /var/lib/dbus/machine-id
+  generator: remove
+
+- path: /etc/fstab
+  generator: dump
+  types:
+  - container
+
+- path: /etc/hostname
+  generator: hostname
+
+- path: /etc/hosts
+  generator: hosts
+
+- name: eth0.network
+  path: /etc/systemd/network/eth0.network
+  generator: dump
+  content: |-
+    [Match]
+    Name=eth0
+
+    [Network]
+    DHCP=ipv4
+
+    [DHCPv4]
+    UseDomains=true
+    UseMTU=true
+
+    [DHCP]
+    ClientIdentifier=mac
+  variants:
+  - default
+  types:
+  - container
+
+- name: enp5s0.network
+  path: /etc/systemd/network/enp5s0.network
+  generator: dump
+  content: |-
+    [Match]
+    Name=enp5s0
+
+    [Network]
+    DHCP=ipv4
+
+    [DHCPv4]
+    UseDomains=true
+    UseMTU=true
+
+    [DHCP]
+    ClientIdentifier=mac
+  variants:
+  - default
+  types:
+  - vm
+
+- path: /usr/local/sbin/enroll-netbird.sh
+  generator: dump
+  content: |-
+    #!/bin/sh
+    set -eu
+
+    # Enroll the instance into NetBird if a setup key is provided.
+    # Usage: enroll-netbird.sh <setup-key-file>
+    # The setup key is read by netbird itself from the file (--setup-key-file).
+    # With an empty or missing file, this is a no-op.
+    KEY_FILE="${1:-}"
+
+    # No-op when no key file is provided, or it does not exist or is empty.
+    if [ -z "${KEY_FILE}" ] || [ ! -s "${KEY_FILE}" ]; then
+      exit 0
+    fi
+
+    # Remove the setup key file on exit, whether enrollment succeeds or not.
+    trap 'rm -f "${KEY_FILE}"' EXIT
+
+    # The netbird daemon is not part of the image (the RPM %post that installs
+    # the service is skipped at build time with tsflags=noscripts), so install
+    # and start it here, at runtime, where systemd is running.
+    export HOME=/root
+    export XDG_CONFIG_HOME=/root/.config
+
+    netbird service install || true
+    netbird service start || true
+
+    # Wait for the daemon socket to appear.
+    SOCKET=""
+    i=0
+    while [ -z "${SOCKET}" ] && [ "${i}" -lt 30 ]; do
+      if [ -S /var/run/netbird.sock ]; then
+        SOCKET=/var/run/netbird.sock
+      else
+        for f in /var/run/netbird/*.sock; do
+          if [ -S "${f}" ]; then
+            SOCKET="${f}"
+            break
+          fi
+        done
+      fi
+      [ -z "${SOCKET}" ] && sleep 1
+      i=$((i + 1))
+    done
+
+    [ -n "${SOCKET}" ] || {
+      echo "enroll-netbird.sh: netbird daemon socket not found" >&2
+      exit 1
+    }
+
+    # Bring the interface up. Retry a few times as the daemon may still be
+    # settling. The setup key is read by netbird from the file. Failing to
+    # enroll is a hard error (blocking cloud-init).
+    attempt=0
+    while ! netbird up --daemon-addr "unix://${SOCKET}" --setup-key-file "${KEY_FILE}"; do
+      attempt=$((attempt + 1))
+      if [ "${attempt}" -ge 5 ]; then
+        echo "enroll-netbird.sh: netbird up failed after ${attempt} attempts" >&2
+        exit 1
+      fi
+      sleep 5
+    done
+
+    exit 0
+
+- name: meta-data
+  generator: cloud-init
+  variants:
+  - cloud
+
+- name: network-config
+  generator: cloud-init
+  content: |-
+    {% if config_get("user.network-config", "") == "" %}version: 1
+    config:
+      - type: physical
+        name: {% if instance.type == "virtual-machine" %}enp5s0{% else %}eth0{% endif %}
+        subnets:
+          - type: {% if config_get("user.network_mode", "") == "link-local" %}manual{% else %}dhcp{% endif %}
+            control: auto
+          - type: dhcp6
+            control: auto{% else %}{{ config_get("user.network-config", "") }}{% endif %}
+  variants:
+  - cloud
+
+- name: user-data
+  generator: cloud-init
+  variants:
+  - cloud
+
+- name: vendor-data
+  generator: cloud-init
+  variants:
+  - cloud
+
+- generator: incus-agent
+  types:
+  - vm
+
+packages:
+  manager: dnf
+  update: true
+  cleanup: true
+  repositories:
+  - name: netbird
+    url: |-
+      [netbird]
+      name=netbird
+      baseurl=https://pkgs.netbird.io/yum/
+      enabled=1
+      gpgcheck=1
+      gpgkey=https://pkgs.netbird.io/yum/repodata/repomd.xml.key
+      repo_gpgcheck=1
+  sets:
+  - packages:
+    - cpio
+    - file
+    - findutils
+    - fipscheck
+    - gettext
+    - glibc-all-langpacks
+    - hardlink
+    - hostname
+    - ipcalc
+    - iproute
+    - iproute-tc
+    - iputils
+    - kbd
+    - kmod
+    - openssh-clients
+    - openssh-server
+    - passwd
+    - pigz
+    - policycoreutils
+    - procps-ng
+    - sudo
+    - systemd-udev
+    - which
+    - xz
+    - tmux
+    action: install
+
+  - packages:
+    - cloud-init
+    action: install
+    variants:
+    - cloud
+
+  - packages:
+    - netbird
+    action: install
+    flags:
+    - "--setopt=tsflags=noscripts"
+
+  - packages:
+    - podman
+    - podman-compose
+    action: install
+
+  - packages:
+    - cloud-init
+    action: install
+    variants:
+    - cloud
+
+  - packages:
+    - cloud-utils-growpart
+    action: install
+    types:
+    - vm
+    variants:
+    - cloud
+
+  - packages:
+    - grub2-efi-x64
+    action: install
+    architectures:
+    - x86_64
+    types:
+    - vm
+
+  - packages:
+    - grub2-efi-aa64
+    action: install
+    architectures:
+    - aarch64
+    types:
+    - vm
+
+  - packages:
+    - kernel
+    - shim
+    - dracut
+    action: install
+    types:
+    - vm
+
+  - packages:
+    - lvm2
+    - lvm2-libs
+    action: remove
+    types:
+    - vm
+
+  - packages:
+    - libsss_idmap
+    - libsss_nss_idmap
+    - sssd-client
+    action: remove
+
+actions:
+- trigger: post-unpack
+  action: |-
+    #!/bin/sh
+
+    set -eux
+
+    # Increase connection timeout
+    echo timeout=60 >> /etc/dnf/dnf.conf
+
+    # Let dnf find the fastest mirror
+    echo fastestmirror=True >> /etc/dnf/dnf.conf
+
+    # Backup all repo files
+    for repo in $(ls /etc/yum.repos.d/*.repo); do
+      cp "${repo}" "${repo}.bak"
+    done
+
+- trigger: post-unpack
+  action: |-
+    #!/bin/sh
+
+    set -eux
+
+    # Use Fedora 38 GPG key to avoid package installation errors
+    for repo in $(ls /etc/yum.repos.d/*.repo); do
+      grep -q 'RPM-GPG-KEY-fedora-38' "${repo}" && continue
+
+      sed -ri 's#^gpgkey=.*#\0 file:///etc/pki/rpm-gpg/RPM-GPG-KEY-fedora-38-$basearch#g' "${repo}"
+    done
+  architectures:
+  - aarch64
+  - x86_64
+  releases:
+  - Rawhide
+
+- trigger: post-unpack
+  action: |-
+    #!/bin/sh
+
+    set -eux
+
+    # Use baseurl instead of metalink to avoid networking issues
+    for repo in $(ls /etc/yum.repos.d/*.repo); do
+      grep -q '^#baseurl' "${repo}" || continue
+
+      sed -ri 's/^metalink=.*/#\0/g;s@^#(baseurl=)http://download.example/pub/fedora/linux(.*)@\1https://muug.ca/mirror/fedora-secondary\2@g' "${repo}"
+    done
+  architectures:
+  - ppc64le
+  - s390x
+
+- trigger: post-packages
+  action: |-
+    #!/bin/sh
+    set -eux
+
+    umount -l /etc/resolv.conf || true
+    rm /etc/resolv.conf
+    ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
+    cp -R /etc/skel/.bash* /root/
+
+    systemctl enable systemd-resolved
+    systemctl enable systemd-networkd
+
+    systemctl mask systemd-homed-firstboot.service || true
+
+    # Re-apply all the capabilities.
+    rpm -qa | sudo xargs -n1 rpm --setcaps || true
+
+    exit 0
+
+- trigger: post-packages
+  action: |-
+    #!/bin/sh
+    set -eux
+
+    systemctl enable sshd
+
+- trigger: post-packages
+  action: |-
+    #!/bin/sh
+    set -eux
+
+    useradd --user-group --create-home --shell /bin/bash fedora
+    echo "fedora ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/fedora
+    passwd -l root
+
+- trigger: post-packages
+  action: |-
+    #!/bin/sh
+    set -eux
+
+    # newuidmap/newgidmap must be setuid root for rootless podman to be able
+    # to write the uid_map/gid_map of its nested user namespace.
+    chmod u+s /usr/bin/newuidmap /usr/bin/newgidmap
+
+- trigger: post-packages
+  action: |-
+    #!/bin/sh
+    systemctl enable cloud-init
+    systemctl enable cloud-config
+    systemctl enable cloud-final
+    systemctl mask dhcpcd
+  variants:
+  - cloud
+
+- trigger: post-unpack
+  action: |-
+    #!/bin/sh
+    # Generate machine-id in order for the kernel stuff to be configured properly
+    # Toléré si absent : l'image de base Fedora ne livre plus systemd-machine-id-setup
+    if command -v systemd-machine-id-setup >/dev/null 2>&1; then
+      systemd-machine-id-setup
+    fi
+  types:
+  - vm
+
+- trigger: post-files
+  action: |-
+    #!/bin/sh
+    set -eux
+
+    # Remove the "Container Image" string as this is going to be am VM
+    sed -i 's/[ ]*(Container Image)//;/^VARIANT/d' /etc/os-release
+
+    target=/boot/efi/EFI/fedora/grub.cfg
+    grub2-mkconfig -o "${target}"
+    sed -i "s#root=[^ ]*#root=${DISTROBUILDER_ROOT_UUID}#g" "${target}"
+
+    # grub2-mkconfig runs inside the distrobuilder build rootfs and can record the
+    # absolute build path (e.g. /root/var/cache/distrobuilder.<id>/rootfs/boot/...)
+    # in the menu entries (grub.cfg and /boot/loader/entries/*) instead of the
+    # /boot/... path the VM actually uses. Strip any such prefix so the kernel
+    # and initramfs resolve correctly at boot.
+    sed -ri 's#[^ ]*/boot#/boot#g' "${target}"
+    sed -Eri 's#(^(linux|initrd|linuxefi) )[^ ]*/boot#\1/boot#g' /boot/loader/entries/*
+    sed -ri 's#^options .+#options $kernelopts#g' /boot/loader/entries/*
+
+    # Regenerate initramfs
+    kver=$(ls /boot/initramfs-*.img | sed -r 's#.*initramfs-(.+)\.img#\1#')
+    dracut --kver "${kver}" -f
+
+    # Unmask all masked unit files
+    for f in $(find /etc/systemd/system -type l); do
+      [ "$(readlink ${f})" = "/dev/null" ] && rm "${f}"
+    done
+
+    # Wipe grub environment
+    rm -f /boot/efi/EFI/fedora/grubenv
+
+    exit 0
+  types:
+  - vm
+
+- trigger: post-files
+  action: |-
+    #!/bin/sh
+    set -eux
+
+    # Restore repos
+    for repo in $(ls /etc/yum.repos.d/*.bak); do
+      mv "${repo}" ${repo%.*}
+    done
+
+    # Disable first boot wizard
+    systemctl mask systemd-firstboot.service
+
+    # Disable xfs_healer
+    systemctl mask xfs_healer@-.service

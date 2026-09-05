@@ -1,0 +1,30 @@
+[tools]
+"go:github.com/lxc/distrobuilder/v3/distrobuilder" = { version = "v3.3.2-0.20260811001855-e2c0bcd03815" }
+"github:lxc/incus" = { version = "6.23", bin = "incus" }
+
+[tasks.build-lxc]
+description = "Build the Fedora LXC container image with distrobuilder"
+run = """
+DISTROBUILDER_BIN="$(mise which distrobuilder)"
+sudo systemd-run --scope --quiet \
+  -p CPUQuota=200% \
+  -p MemoryHigh=6G \
+  -p MemoryMax=10G \
+  -p IOWeight=1 \
+  -- "$DISTROBUILDER_BIN" build-incus fedora.yaml dist-fedora-lxc \
+  --sources-dir .distrobuilder-sources
+sudo chown -R $USER:$USER dist-fedora-lxc
+ls -lha dist-fedora-lxc/
+echo "Image built in dist-fedora-lxc/. Run 'mise run import-lxc' to import it into incus1:"
+"""
+
+[tasks.import-lxc-image-to-incus1-registry]
+description = "Import the LXC image built by build-lxc into the incus1: image remote"
+run = """
+incus image import \
+  dist-fedora-lxc/incus.tar.xz \
+  dist-fedora-lxc/rootfs.squashfs \
+  incus1: \
+  --alias fedora-44-sklein-container-foot-incus-ssh-tmux-osc52-poc \
+  --reuse
+"""
