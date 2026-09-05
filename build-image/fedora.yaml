@@ -353,6 +353,7 @@ packages:
     - which
     - xz
     - tmux
+    - neovim
     action: install
 
   - packages:
@@ -510,6 +511,57 @@ actions:
     useradd --user-group --create-home --shell /bin/bash fedora
     echo "fedora ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/fedora
     passwd -l root
+
+# OSC 52 bidirectional clipboard for the foot -> ssh -> tmux chain.
+# foot supports OSC 52 but ships no Ms terminfo capability, so tmux must be
+# told (clipboard feature) that a client reporting TERM=foot may set the
+# system clipboard; otherwise tmux never emits OSC 52 towards foot.
+# Written in post-packages (not files:) so /home/fedora exists and skel files
+# were already copied by useradd --create-home.
+- trigger: post-packages
+  action: |-
+    #!/bin/sh
+    set -eux
+
+    cat > /home/fedora/.tmux.conf <<'EOF'
+    # OSC 52 bidirectional clipboard for the foot -> ssh -> tmux chain.
+    set -g set-clipboard on
+    set -g get-clipboard both
+    set -ag terminal-features 'foot:clipboard'
+    # Mouse selection in a pane triggers a tmux copy sent to foot via OSC 52.
+    set -g mouse on
+    # Neovim-like copy mode: prefix + [ then v to start a selection, move the
+    # cursor (hjkl/w/b), y or Enter to copy, q to cancel.
+    set -g mode-keys vi
+    set -wg mode-keys vi
+    bind-key -T copy-mode-vi v send-keys -X begin-selection
+    bind-key -T copy-mode-vi y send-keys -X copy-selection-and-cancel
+    EOF
+    chown fedora:fedora /home/fedora/.tmux.conf
+    chmod 0644 /home/fedora/.tmux.conf
+
+# Neovim clipboard over OSC 52: the instance is headless (no X/Wayland), so
+# the default system clipboard provider would not work. Wire the built-in
+# OSC 52 provider (vim.ui.clipboard.osc52) and make y/p use it through
+# clipboard=unnamedplus. Like .tmux.conf this is written in post-packages so
+# /home/fedora exists.
+- trigger: post-packages
+  action: |-
+    #!/bin/sh
+    set -eux
+
+    mkdir -p /home/fedora/.config/nvim
+    cat > /home/fedora/.config/nvim/init.lua <<'EOF'
+    local osc52 = require('vim.ui.clipboard.osc52')
+    vim.g.clipboard = {
+      name = 'OSC 52',
+      copy = { ['+'] = osc52.copy('+'), ['*'] = osc52.copy('*') },
+      paste = { ['+'] = osc52.paste('+'), ['*'] = osc52.paste('*') },
+    }
+    vim.opt.clipboard = 'unnamedplus'
+    EOF
+    chown -R fedora:fedora /home/fedora/.config
+    chmod 0644 /home/fedora/.config/nvim/init.lua
 
 - trigger: post-packages
   action: |-
