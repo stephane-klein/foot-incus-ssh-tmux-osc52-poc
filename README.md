@@ -20,7 +20,19 @@ This environment must support the following features:
     - [x] paste host → nvim: `wl-copy "text"` on the host, then `p` in nvim inserts it
     - [x] paste host → nvim: large clipboard (100+ KiB) pastes completely, without "Waiting for OSC 52 response" or timeout
     - Note: foot only honors OSC-52 clipboard reads/writes from a window that has keyboard focus (unfocused attempts are dropped with a `warn: osc.c … unfocused` log, no foot option to relax this). Since tmux broadcasts copies to all attached clients, keep the console you copy/paste from focused and ignore these warnings on other consoles.
-- [ ] Implement image display in the terminal
+- [x] Implement image display in the terminal
+  - Note: foot implements a single image protocol, **SIXEL** (kitty/iTerm2 graphics protocols are deliberately not supported upstream, see [dnkl/foot#481](https://codeberg.org/dnkl/foot/issues/481)). SIXEL escapes are transparent over ssh, and images reach the local foot either:
+    - **via tmux passthrough** (`allow-passthrough on`, tmux ≥ 3.3) — the quality path: foot renders the sixel stream itself, at full resolution. Used by `image.nvim` (sixel backend, it wraps the stream in `\ePtmux;…`) and by `chafa --passthrough`.
+    - **via tmux native SIXEL** (`terminal-features 'foot:sixel'`, requires a tmux built with `--enable-sixel`, Fedora ships it) — fallback for tools emitting raw sixel (`img2sixel`, `chafa` without passthrough). tmux SIXEL handling is basic, quality is reduced and images are not tracked on redraws (see [tmux#4436](https://github.com/tmux/tmux/issues/4436)).
+  - Acceptance (manual, end-to-end over the whole foot → ssh → tmux → nvim chain, in a new `mise run console` window)
+    - [x] Terminal (foot → ssh, no tmux: `ssh -t … bash`): `chafa --format=sixel ~/poc.png` shows a sharp image
+    - [x] Terminal, full chain: `chafa --format=sixel --passthrough=auto ~/poc.png` shows a sharp image in a tmux pane
+    - [x] Terminal, native fallback: `img2sixel ~/poc.png` shows an image (reduced quality acceptable)
+    - [x] nvim image buffer: `nvim ~/poc.png` renders the PNG (image.nvim `hijack_file_patterns`)
+    - [x] nvim markdown: a doc with `![](poc.png)` renders inline when the cursor is on the image
+    - [x] Robustness: pane scroll, window resize, two foot consoles attached to the same grouped session → no crash, image redraws (some artifacts on scroll are expected for sixel)
+    - Note: sixel is palette-limited (256 colors) and an image pushed through tmux passthrough is *not* part of the tmux screen grid, so tmux-initiated redraws/scrolls can leave or erase it until the app redraws. Keep the test console focused.
+  - Test protocol: see [docs/image-display-test-protocol.md](docs/image-display-test-protocol.md)
 - [ ] Implement opening remote URLs in the local host's browser
 - [ ] Implement forwarding of remote notifications to the local desktop
 - [ ] Implement streaming of sound generated remotely to the local host's audio output

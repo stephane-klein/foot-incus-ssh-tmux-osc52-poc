@@ -354,6 +354,9 @@ packages:
     - xz
     - tmux
     - neovim
+    - chafa
+    - ImageMagick
+    - libsixel-utils
     action: install
 
   - packages:
@@ -536,6 +539,17 @@ actions:
     set -wg mode-keys vi
     bind-key -T copy-mode-vi v send-keys -X begin-selection
     bind-key -T copy-mode-vi y send-keys -X copy-selection-and-cancel
+    # SIXEL image display for the foot -> ssh -> tmux chain.
+    # allow-passthrough (tmux >= 3.3) forwards image escape sequences verbatim
+    # to foot, which renders sixel at full quality (image.nvim backend and
+    # `chafa --passthrough` rely on this).
+    set -g allow-passthrough on
+    # Fallback: tell tmux foot supports sixel, so raw sixel emitted in a pane
+    # (img2sixel, chafa without passthrough) is handled by tmux and forwarded.
+    set -ag terminal-features 'foot:sixel'
+    # Needed by image.nvim for correct show/hide of images across tmux windows.
+    set -g focus-events on
+    set -g visual-activity off
     EOF
     chown fedora:fedora /home/fedora/.tmux.conf
     chmod 0644 /home/fedora/.tmux.conf
@@ -559,9 +573,40 @@ actions:
       paste = { ['+'] = osc52.paste('+'), ['*'] = osc52.paste('*') },
     }
     vim.opt.clipboard = 'unnamedplus'
+
+    -- Image display over the foot -> ssh -> tmux chain (SIXEL backend).
+    -- image.nvim wraps the sixel stream in a tmux passthrough sequence so foot
+    -- (the outer terminal) renders it at full quality. Requires tmux option
+    -- allow-passthrough on (see ~/.tmux.conf).
+    local ok, image = pcall(require, "image")
+    if ok then
+      image.setup({
+        backend = "sixel",
+        processor = "magick_cli",
+        integrations = {
+          markdown = {
+            enabled = true,
+            only_render_image_at_cursor = true,
+          },
+        },
+        max_width_window_percentage = 100,
+        max_height_window_percentage = 100,
+      })
+    end
     EOF
     chown -R fedora:fedora /home/fedora/.config
     chmod 0644 /home/fedora/.config/nvim/init.lua
+
+    # image.nvim (SIXEL backend) for inline images in nvim; pinned tag v1.5.1.
+    # Installed as a plain native pack so no plugin manager is needed. curl and
+    # tar are part of the base Fedora cloud image.
+    mkdir -p /home/fedora/.local/share/nvim/site/pack/vendor/start
+    curl -fsSL -o /tmp/image.nvim.tgz https://codeload.github.com/3rd/image.nvim/tar.gz/refs/tags/v1.5.1
+    mkdir -p /tmp/image.nvim-extract
+    tar -xzf /tmp/image.nvim.tgz -C /tmp/image.nvim-extract
+    mv /tmp/image.nvim-extract/image.nvim-* /home/fedora/.local/share/nvim/site/pack/vendor/start/image.nvim
+    rm -rf /tmp/image.nvim.tgz /tmp/image.nvim-extract
+    chown -R fedora:fedora /home/fedora/.local/share/nvim
 
 - trigger: post-packages
   action: |-
