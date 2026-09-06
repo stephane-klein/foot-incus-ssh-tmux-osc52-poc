@@ -10,6 +10,10 @@
 >
 > Prepared with AI assistance (OpenCode, DeepSeek V4 Flash) — see
 > "Preparation note" below.
+>
+> Suggested title: `SIXEL images silently not displayed above a fixed ~1069 px width cap, regardless of window size`
+>
+> (Alternatives: `chafa/img2sixel output silently vanishes above a ~1.07 k px image width, window size irrelevant` — `SIXEL above a fixed size cap (~1.07 k px wide) is silently dropped, no error in logs`)
 
 ---
 
