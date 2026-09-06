@@ -71,20 +71,22 @@ the objectives above:
   terminal and nvim over the foot → ssh → tmux chain (the two transport paths,
   bricks, limitations) and its acceptance test protocol.
 
-## Known issue (upstream, not yet reported)
+## Known issue — SIXEL > ~1.07 k px silently dropped in the tmux chain (paused)
 
-foot silently does not display SIXEL images wider than roughly 1.07 k px
-(measured: `img2sixel -w 1068` displayed, `-w 1069` not; `chafa --size=102x62`
-displayed, `--size=103x63` not, whatever the window size). Chafa auto-scales to
-the window width, so a wide/maximized console makes the image exceed the cap
-and nothing appears until a small image is displayed again.
+SIXEL images wider than ~1.07 k px are silently dropped **in the tmux layer of
+this POC's chain** (measured on instance tmux 3.7c: `img2sixel -w 1068`
+displayed, `-w 1069` not, whatever the foot window / tmux pane size). A control
+on 2026-09-06 showed foot **standalone** renders images up to 2000 px wide
+(110×109 and 284×79 windows), so foot is not at fault. Inside tmux the drop is
+sticky (nothing displays again until the console is reopened) and also hit the
+passthrough route at large sizes.
 
-Consequence for the image tests below: keep the console at a moderate width
-(e.g. `--window-size-chars=100x55`) or constrain the emitter
-(`chafa --size` / `img2sixel -w`), i.e. keep images ≤ ~1000 px wide.
+Consequence for the image tests below: while using tmux keep **raw** sixel
+output ≤ ~1068 px wide (`chafa --size` / `img2sixel -w`, moderate console
+width); do not widen the console too far during the tests.
 
-Full report, measurements, related upstream issues and analysis scripts:
-[`foot-sixel-size-bug/`](foot-sixel-size-bug/).
+Still an open problem, investigation paused. Full report, measurements and
+analysis scripts: [`foot-sixel-size-bug/`](foot-sixel-size-bug/).
 
 ## Getting started
 
@@ -203,11 +205,12 @@ $ curl -fL -o ~/poc.jpg 'https://commons.wikimedia.org/wiki/Special:FilePath/J%C
 Fine detail and smooth gradients in the photo make resolution easy to eyeball.
 Full test protocol and implementation details: [docs/image-display.md](docs/image-display.md).
 
-> Known foot limitation (upstream, not yet reported): foot does not display
-> SIXEL images wider than ~1.07 k px — the image silently disappears, whatever
-> the window size. `chafa --format=sixel` scales to the window width, so in a
-> wide or maximized console the steps below show nothing. Keep this console at
-> a moderate width (`mise run console` opens 100×55) and do not resize or
+> Known issue (paused; tmux layer, foot exonerated on 2026-09-06): SIXEL
+> images wider than ~1.07 k px silently disappear **inside the tmux chain**,
+> whatever the window/pane size, and tmux then keeps dropping images until the
+> console is reopened. `chafa --format=sixel` scales to the window width, so a
+> wide or maximized console can push the image over the limit. Keep this console
+> at a moderate width (`mise run console` opens 100×55) and do not resize or
 > maximize it during the tests; or constrain the emitter
 > (`chafa --size` / `img2sixel -w`). Details, measurements and analysis
 > scripts: [foot-sixel-size-bug/](foot-sixel-size-bug/).
@@ -218,9 +221,9 @@ Full test protocol and implementation details: [docs/image-display.md](docs/imag
   $ ssh -t fedora@foot-incus-ssh-tmux-osc52-poc.homelab.stephane-klein.info bash
   $ chafa --format=sixel ~/poc.jpg
   ```
-  Expected: sharp image with crisp detail. If it fails here, first rule out the
-  known foot width cap above (too-wide window); otherwise foot or ssh is the
-  problem — do not continue.
+  Expected: sharp image with crisp detail. If it fails here, foot or ssh is the
+  problem — do not continue (the ~1 k px drop described above is specific to
+  the tmux chain, not to this foot → ssh path).
 - Full chain in a terminal (foot → ssh → tmux): in a `mise run console` window,
   compare both transport paths:
   ```

@@ -1,26 +1,33 @@
-# Issue template — foot upstream tracker
+# (ARCHIVE — superseded) Issue draft: SIXEL images > ~1069 px silently dropped in the tmux chain
 
-> **STATUS: NOT YET POSTED**
+> **STATUS: SUPERSEDED — DO NOT POST (foot re-tested 2026-09-06)**
 >
-> This is a draft, ready to copy/paste at
-> https://codeberg.org/dnkl/foot/issues/new/choose once the upstream sixel
-> sizing fixes (#2355 / #2343 / #2372) have landed and the cap has been
-> re-measured on a recent build. Do not post before that re-test: the
-> behaviour may have changed.
+> The silent cap described in this draft was **not reproducible on foot alone**.
+> On the current build `1.28.0-3-g180df200` (Sep 06 2026), foot **standalone**
+> renders SIXEL images up to 2000 px wide (windows 110×109 and 284×79, resize
+> included). The drop reproduces only **through the tmux layer** of this POC's
+> chain (instance tmux 3.7c, native SIXEL path): silent, sticky until the foot
+> window is reopened, independent of the pane geometry (fails at ~1068 px in a
+> 284-col pane). The original runs assumed "no tmux", but the windows had opened
+> the tmux spawned by `assets/foot.ini` (`shell=/usr/bin/tmux new-session`).
+>
+> This issue is therefore **misattributed to foot** and must **not** be posted
+> on the foot tracker. Kept here as an archive of the original measurements; a
+> follow-up, if any, would target the tmux tracker. Decisive re-test and full
+> analysis: [`README.md`](README.md).
 >
 > Prepared with AI assistance (OpenCode, DeepSeek V4 Flash) — see
 > "Preparation note" below.
 >
-> Suggested title: `SIXEL images silently not displayed above a fixed ~1069 px width cap, regardless of window size`
->
-> (Alternatives: `chafa/img2sixel output silently vanishes above a ~1.07 k px image width, window size irrelevant` — `SIXEL above a fixed size cap (~1.07 k px wide) is silently dropped, no error in logs`)
+> Title used for this archive draft: `SIXEL images silently not displayed above
+> a fixed ~1069 px width cap in the tmux chain (foot exonerated)`.
 
 ---
 
 ### Foot Version
 
-- `foot version: 1.27.0-37-ge5916a02 (Jul 27 2026, branch 'master') -pgo +ime +graphemes +toplevel-tag +blur -assertions`
-- `foot version: 1.28.0-3-g180df200 (Sep 06 2026, branch 'master') -pgo +ime +graphemes +toplevel-tag +blur -assertions` — bug reproduced on both
+- `foot version: 1.27.0-37-ge5916a02 (Jul 27 2026, branch 'master') -pgo +ime +graphemes +toplevel-tag +blur -assertions` — historical; binary no longer installed, not re-testable
+- `foot version: 1.28.0-3-g180df200 (Sep 06 2026, branch 'master') -pgo +ime +graphemes +toplevel-tag +blur -assertions` — re-tested 2026-09-06 on this build (foot exonerated, see STATUS)
 
 ### TERM environment variable
 
@@ -36,11 +43,12 @@ Fedora (please fill exact release)
 
 ### Terminal multiplexer
 
-No response
+tmux 3.7c — the failing runs went through the tmux spawned by the config; the
+original "No response" answer was wrong (see STATUS)
 
 ### Shell, TUI, application
 
-bash (interactive, over `ssh -t`, no tmux); `chafa` 1.18.2, `img2sixel` 1.10.5
+bash (interactive, over `ssh -t`, inside the config-spawned tmux); `chafa` 1.18.2, `img2sixel` 1.10.5
 
 ### Server/standalone mode
 
@@ -131,10 +139,17 @@ Windows are opened with:
 
 ### Description of Bug and Steps to Reproduce
 
+> **Re-test 2026-09-06** — this report is superseded: foot **standalone** does
+> not cap (SIXEL ≥ 2000 px renders). The drop below is specific to the **tmux
+> layer** of this POC's chain and is kept here only as the historical repro.
+> Decisive data: [`README.md`](README.md).
+
 SIXEL images are **silently not displayed** once they exceed a fixed size,
 whatever the terminal window size. Smaller images always display, including
 after a window resize. No error is logged on screen; only closing and reopening
 the foot window "resets" the behaviour (because a smaller image is then drawn).
+Note that the window opened below runs the tmux spawned by the config
+(`shell=/usr/bin/tmux new-session`), which is where the drop happens.
 
 Reproduction with `img2sixel` (exact pixel dimensions, no cell logic):
 
@@ -148,11 +163,12 @@ Reproduction with `chafa` (cell-based scaling):
 2. `chafa --format=sixel --size=102x62 test.jpg` → displayed.
 3. `chafa --format=sixel --size=103x63 test.jpg` → **not displayed**.
 
-Key observation: the threshold is **identical in very different window sizes**
-(110×109 rows and 284×79 rows both fail between `--size=102x62` and
-`--size=103x63`, and between `img2sixel -w 1068` and `-w 1069`). With foot's
-cell width this corresponds to an image width of roughly **1.07 k px**. The
-limit is therefore a fixed foot-side cap, independent of the visible viewport.
+Key observation (historical): the threshold is **identical in very different
+window sizes** (110×109 rows and 284×79 rows both fail between `--size=102x62`
+and `--size=103x63`, and between `img2sixel -w 1068` and `-w 1069`). This was
+read at the time as a fixed foot-side cap independent of the visible viewport;
+the 2026-09-06 re-test showed it is a **tmux-layer** drop (constant tmux pane,
+foot standalone unaffected).
 
 Test image: any aspect ratio ~1.65:1 landscape photo (here 5874×3549).
 

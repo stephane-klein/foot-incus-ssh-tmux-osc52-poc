@@ -34,7 +34,9 @@ understand. Two bricks make images cross tmux:
    parses *raw* SIXEL emitted in a pane (`img2sixel`, `chafa` without
    passthrough) and forwards it. tmux SIXEL handling is basic: reduced quality,
    and images are not tracked on redraws
-   ([tmux#4436](https://github.com/tmux/tmux/issues/4436)).
+   ([tmux#4436](https://github.com/tmux/tmux/issues/4436)). On tmux 3.7c this
+   path also silently drops images wider than ~1.07 k px (see Known
+   limitations).
 
 Consequence of the two paths: an image pushed through passthrough is *not* part
 of the tmux screen grid, so tmux-initiated redraws or scrolls can leave it
@@ -69,10 +71,13 @@ No change is required in `assets/foot.ini` for images.
   prefer the passthrough path.
 - A passthrough image is not part of the tmux grid: tmux-initiated
   scrolls/redraws can leave artifacts until the app redraws.
-- foot does not display SIXEL images wider than ~1.07 k px (silent, whatever
-  the window size; unrelated to the passthrough/tmux paths). Keep test images
-  ≤ ~1000 px wide (moderate window or `chafa --size` / `img2sixel -w`). Full
-  report and analysis scripts:
+- SIXEL wider than ~1.07 k px is silently dropped **inside the tmux chain** of
+  this POC (native path, raw emitters like `img2sixel` / `chafa` without
+  passthrough; sticky until the console is reopened). A 2026-09-06 control
+  showed foot standalone renders ≥ 2000 px wide — foot is not at fault. While
+  using tmux keep test images ≤ ~1068 px wide (moderate window or
+  `chafa --size` / `img2sixel -w`). Investigation paused. Full report and
+  analysis scripts:
   [`../foot-sixel-size-bug/`](../foot-sixel-size-bug/).
 
 ## Annex — acceptance test protocol
@@ -135,7 +140,9 @@ img2sixel ~/poc.jpg                                 # native sixel fallback (qua
 
 Expected: image visible in both cases. Compare sharpness between the two to
 confirm passthrough engages (if `--passthrough=auto` yields no/lower quality,
-retry with `--passthrough=tmux`).
+retry with `--passthrough=tmux`). Note: in a very wide pane the raw `img2sixel`
+image (> ~1.07 k px) is silently dropped by tmux native SIXEL (see Known
+limitations) — keep the console at a moderate width for this test.
 
 ### P3 — nvim image buffer
 
